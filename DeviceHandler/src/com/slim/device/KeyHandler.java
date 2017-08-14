@@ -20,6 +20,7 @@ import android.app.NotificationManager;
 import android.content.Context;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.content.SharedPreferences;
+import android.database.ContentObserver;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -32,6 +33,7 @@ import android.os.PowerManager.WakeLock;
 import android.os.SystemProperties;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.service.notification.ZenModeConfig;
 import android.util.Log;
 import android.view.KeyEvent;
 
@@ -87,6 +89,23 @@ public class KeyHandler implements DeviceKeyHandler {
     private Sensor mProximitySensor;
     private Vibrator mVibrator;
     WakeLock mProximityWakeLock;
+
+    private boolean mFirstBoot;
+    private int mRingerMode;
+
+    private Handler mHandler = new Handler();
+    private ContentObserver mRingerObserver = new ContentObserver(mHandler) {
+        @Override
+        public void onChange(boolean selfChange) {
+        super.onChange(selfChange);
+            int ringerMode = Settings.Global.getInt(mContext.getContentResolver(),
+                    Settings.Global.MODE_RINGER, 1);
+
+            if (ringerMode != AudioManager.RINGER_MODE_SILENT) {
+                mRingerMode = ringerMode;
+            }
+        }
+    };
 
     public KeyHandler(Context context) {
         mContext = context;
@@ -155,25 +174,44 @@ public class KeyHandler implements DeviceKeyHandler {
                         doHapticFeedback();
                 break;
             case MODE_TOTAL_SILENCE:
+                mContext.getContentResolver().unregisterContentObserver(mRingerObserver);
                 setZenMode(Settings.Global.ZEN_MODE_NO_INTERRUPTIONS);
                 break;
             case MODE_ALARMS_ONLY:
+                if (mFirstBoot) {
+                    mFirstBoot = false;
+                }
+                mContext.getContentResolver().unregisterContentObserver(mRingerObserver);
                 setZenMode(Settings.Global.ZEN_MODE_ALARMS);
                 break;
             case MODE_PRIORITY_ONLY:
+                mContext.getContentResolver().unregisterContentObserver(mRingerObserver);
                 setZenMode(Settings.Global.ZEN_MODE_IMPORTANT_INTERRUPTIONS);
                 break;
             case MODE_NONE:
                 setZenMode(Settings.Global.ZEN_MODE_OFF);
+                mContext.getContentResolver().registerContentObserver(
+                    Settings.Global.getUriFor(Settings.Global.MODE_RINGER),false,mRingerObserver);
+                mAudioManager.setRingerMode(mRingerMode);
                 break;
             case MODE_VIBRATE:
+                if (mFirstBoot) {
+                    mFirstBoot = false;
+                }
+                mContext.getContentResolver().unregisterContentObserver(mRingerObserver);
+                setZenMode(Settings.Global.ZEN_MODE_OFF);
                 setRingerModeInternal(AudioManager.RINGER_MODE_VIBRATE);
                 break;
             case MODE_RING:
+                if (mFirstBoot) {
+                    mFirstBoot = false;
+                }
+                mContext.getContentResolver().unregisterContentObserver(mRingerObserver);
+                setZenMode(Settings.Global.ZEN_MODE_OFF);
                 setRingerModeInternal(AudioManager.RINGER_MODE_NORMAL);
                 break;
             }
-            
+
             if (action == null || action != null && action.equals(ActionConstants.ACTION_NULL)) {
                 return;
             }
